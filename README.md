@@ -11,14 +11,25 @@ deliberate. A bot that posts every 5 minutes gets muted.
 ## What a post looks like
 
 ```
-🛰 ISS in radio range in 6 min — 08:13 UTC
+🛰 ISS in radio range in 14 min — 14:23 UTC
 
-Peaks at 40° above the horizon · 6 min of listening
-Tune 145.800 MHz FM, no licence needed:
-https://vhf-goonhilly.batc.org.uk/?tune=145800fm
+Audible from: Dwingeloo 28° · Farnham 24° · Goonhilly 22° · R4UAB 11°
+8 min of listening · tune 145.800 MHz FM:
+https://websdr.camras.nl:8901/
 
 https://isstracker.neocities.org/
 ```
+
+## One post per pass, not per receiver
+
+The ISS footprint is about 4,500 km across. Goonhilly and Farnham are 350 km
+apart, so they hear the same pass; on a good pass every receiver in the list
+hears it at once. The bot therefore finds the pass first, then works out which
+receivers can see it, and sends **one** post naming all of them, linking to
+whichever gets the highest view.
+
+Receivers far enough apart to see genuinely different passes end up as
+separate events on their own, with no special handling.
 
 ## Setup
 
@@ -69,7 +80,8 @@ All of this is at the top of `iss_bot.py`:
 
 | Setting              | Default | What it does                                      |
 |----------------------|---------|---------------------------------------------------|
-| `STATION`            | Goonhilly | Which ground station to watch. Change the lat/lon and SDR link to use another. |
+| `STATIONS`           | 4 receivers | Goonhilly, Farnham, Dwingeloo and R4UAB. Add your own: name, lat, lon, and a link. |
+| `MIN_GAP_MINUTES`    | `45`    | Never post twice inside this window, however busy the sky is. |
 | `MIN_ELEVATION`      | `10.0`  | How high it must get before the pass counts as started. |
 | `MIN_PEAK_ELEVATION` | `20.0`  | Skip passes that never get higher than this. Raise to 40 for only the excellent ones. |
 | `LEAD_MINUTES`       | `12`    | How far ahead of the pass to post.                |
