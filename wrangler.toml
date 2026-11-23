@@ -1,1 +1,12 @@
+# Optional - only needed if you deploy with the Wrangler CLI instead of the
+# Cloudflare dashboard. The dashboard route needs none of this.
+name = "iss-bot"
+main = "worker.js"
+compatibility_date = "2026-01-01"
 
+[triggers]
+# Every 10 minutes, deliberately off the :00 and :05 boundaries.
+crons = ["3,13,23,33,43,53 * * * *"]
+
+# Secrets are NOT set here. Use:  wrangler secret put BSKY_HANDLE
+#                                 wrangler secret put BSKY_APP_PASSWORD
