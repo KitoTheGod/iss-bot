@@ -2,9 +2,16 @@ name: ISS radio-range bot
 
 on:
   schedule:
-    # Every 5 minutes. GitHub often runs these late, sometimes by several
-    # minutes, which is why the bot announces a pass up to 12 minutes ahead.
-    - cron: "*/5 * * * *"
+    # Every 10 minutes, deliberately OFF the :00/:05 boundaries.
+    #
+    # GitHub's scheduler is best-effort: runs are delayed under load and are
+    # sometimes dropped with no warning. Load peaks at the top of the hour and
+    # on */5 boundaries - which is where every naive cron lands. Asking for odd
+    # minutes puts us in a quieter queue and the runs actually happen.
+    #
+    # Because a run can still be skipped, the bot looks far enough ahead
+    # (LEAD_MINUTES = 20) that a missed run does not mean a missed pass.
+    - cron: "3,13,23,33,43,53 * * * *"
   workflow_dispatch:        # lets you run it by hand from the Actions tab
 
 # needed so the bot can commit state.json back and not repeat itself
