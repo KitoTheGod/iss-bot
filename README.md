@@ -1,10 +1,10 @@
-# ISS radio-range bot 
+# ISS radio-range bot
 
 Posts to Bluesky when the International Space Station is about to come into
 radio range of a ground station, so people have time to open a WebSDR and
 actually hear it.
 
-It checks every 5 minutes and posts roughly 4-6 times a day: once per usable
+It checks every 5 minutes and posts up to 6 times a day: once per usable
 pass, about 12 minutes before the pass begins. Most runs do nothing, which is
 deliberate. A bot that posts every 5 minutes gets muted.
 
@@ -19,6 +19,17 @@ https://websdr.camras.nl:8901/
 
 https://isstracker.neocities.org/
 ```
+
+## Three receivers, one per region
+
+The ISS footprint is about 4,500 km across, so receivers within a couple of
+thousand kilometres of each other hear the same pass and add nothing but
+noise. The three here - Cornwall, Utah and Russia - are 3,500 to 9,300 km
+apart, so each one is a genuinely separate event.
+
+Coordinates for Farnham, Dwingeloo and Washington DC are left in the file as
+comments if you want to swap or add one. Washington is the one to add if you
+want US east-coast coverage as well as western.
 
 ## One post per pass, not per receiver
 
@@ -80,8 +91,9 @@ All of this is at the top of `iss_bot.py`:
 
 | Setting              | Default | What it does                                      |
 |----------------------|---------|---------------------------------------------------|
-| `STATIONS`           | 4 receivers | Goonhilly, Farnham, Dwingeloo and R4UAB. Add your own: name, lat, lon, and a link. |
+| `STATIONS`           | 3 receivers | Goonhilly (UK), Utah (USA), R4UAB (Russia). Swap coordinates for others are in the file. Add your own: name, lat, lon, and a link. |
 | `MIN_GAP_MINUTES`    | `45`    | Never post twice inside this window, however busy the sky is. |
+| `MAX_POSTS_PER_DAY`  | `6`     | Hard ceiling per UTC day. The main brake now that receivers span several continents. |
 | `MIN_ELEVATION`      | `10.0`  | How high it must get before the pass counts as started. |
 | `MIN_PEAK_ELEVATION` | `20.0`  | Skip passes that never get higher than this. Raise to 40 for only the excellent ones. |
 | `LEAD_MINUTES`       | `12`    | How far ahead of the pass to post.                |
