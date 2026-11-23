@@ -43,21 +43,22 @@ import requests
 # To add your own: name, latitude, longitude, and a link that opens the
 # receiver. Anything with a VHF antenna and a web interface will do.
 STATIONS = [
+    # One receiver per region. Deliberately NOT a long list: stations close
+    # together hear the same pass, which adds nothing but noise. These three
+    # are far enough apart that each one represents a genuinely different
+    # event, and each has a real VHF antenna.
     {"name": "Goonhilly",  "short": "Goonhilly, Cornwall",
      "lat": 50.0524, "lon": -5.1823,
      "sdr": "https://vhf-goonhilly.batc.org.uk/?tune=145800fm"},
-    {"name": "Farnham",    "short": "Farnham, Surrey",
-     "lat": 51.2149, "lon": -0.7987,
-     "sdr": "http://farnham-sdr.com/"},
-    {"name": "Dwingeloo",  "short": "Dwingeloo, Netherlands",
-     "lat": 52.8122, "lon": 6.3964,
-     "sdr": "https://websdr.camras.nl:8901/"},
     {"name": "Utah",       "short": "Salt Lake City, USA",
      "lat": 40.7000, "lon": -111.8000,
      "sdr": "http://slc2meters.sdrutah.org:8901/?tune=145800fm"},
     {"name": "R4UAB",      "short": "R4UAB, Russia",
      "lat": 54.3282, "lon": 48.3866,
      "sdr": "http://websdr.r4uab.ru/"},
+    # Swaps, if you want them: Farnham 51.2149/-0.7987, Dwingeloo
+    # 52.8122/6.3964, Washington DC 38.9200/-77.0700 (http://websdr.us:8902/).
+    # Washington is the one to add if you want US east-coast coverage too.
 ]
 
 # Minimum elevation above the horizon to bother posting about, in degrees.
@@ -79,6 +80,12 @@ HORIZON_MINUTES = 75
 # Never post twice inside this many minutes, however many passes there are.
 # Stops a busy afternoon turning into a flood.
 MIN_GAP_MINUTES = 45
+
+# Hard ceiling on posts per calendar day (UTC). With receivers spread across
+# several continents the ISS is in range of SOMEBODY most of the time, so this
+# is what stops the account becoming unfollowable. Lower it to 4 or 5 if the
+# timeline still feels busy.
+MAX_POSTS_PER_DAY = 6
 
 # Your website, appended to posts. Set to None to leave it off.
 WEBSITE = "https://isstracker.neocities.org/"
@@ -211,11 +218,14 @@ def load_state():
         with open(STATE_FILE) as f:
             return json.load(f)
     except (OSError, ValueError):
-        return {"announced": [], "last_post": 0}
+        return {"announced": [], "last_post": 0, "per_day": {}}
 
 
 def save_state(state):
     state["announced"] = sorted(state.get("announced", []))[-80:]
+    per_day = state.get("per_day", {})
+    for day in sorted(per_day)[:-14]:      # keep a fortnight
+        del per_day[day]
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=1)
         f.write("\n")
@@ -356,6 +366,13 @@ def main():
         print("already posted about this pass. Nothing to do.")
         return 0
 
+    today = time.strftime("%Y-%m-%d", time.gmtime(now))
+    posted_today = state.get("per_day", {}).get(today, 0)
+    if posted_today >= MAX_POSTS_PER_DAY and not args.force:
+        print("already posted %d times today (cap is %d). Staying quiet."
+              % (posted_today, MAX_POSTS_PER_DAY))
+        return 0
+
     since = (now - state.get("last_post", 0)) / 60.0
     if since < MIN_GAP_MINUTES and not args.force:
         print("posted only %.0f min ago, holding off (minimum gap is %d min)."
@@ -382,6 +399,9 @@ def main():
 
     state.setdefault("announced", []).append(p["key"])
     state["last_post"] = now
+    per_day = state.setdefault("per_day", {})
+    per_day[today] = per_day.get(today, 0) + 1
+    print("that is %d of %d posts for today." % (per_day[today], MAX_POSTS_PER_DAY))
     save_state(state)
     return 0
 
