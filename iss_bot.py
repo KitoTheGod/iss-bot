@@ -36,14 +36,26 @@ import requests
 # CONFIGURATION - edit this bit
 # ----------------------------------------------------------------------------
 
-# The ground station we care about. Default is the Goonhilly WebSDR in
-# Cornwall, which is the one the website recommends for UK passes.
-STATION = {
-    "name": "Goonhilly, Cornwall",
-    "lat": 50.0524,
-    "lon": -5.1823,
-    "sdr": "https://vhf-goonhilly.batc.org.uk/?tune=145800fm",
-}
+# The receivers we watch. The ISS footprint is about 4,500 km across, so
+# several of these hear the same pass; the bot works that out and sends ONE
+# post naming all of them rather than one post each.
+#
+# To add your own: name, latitude, longitude, and a link that opens the
+# receiver. Anything with a VHF antenna and a web interface will do.
+STATIONS = [
+    {"name": "Goonhilly",  "short": "Goonhilly, Cornwall",
+     "lat": 50.0524, "lon": -5.1823,
+     "sdr": "https://vhf-goonhilly.batc.org.uk/?tune=145800fm"},
+    {"name": "Farnham",    "short": "Farnham, Surrey",
+     "lat": 51.2149, "lon": -0.7987,
+     "sdr": "http://farnham-sdr.com/"},
+    {"name": "Dwingeloo",  "short": "Dwingeloo, Netherlands",
+     "lat": 52.8122, "lon": 6.3964,
+     "sdr": "https://websdr.camras.nl:8901/"},
+    {"name": "R4UAB",      "short": "R4UAB, Russia",
+     "lat": 54.3282, "lon": 48.3866,
+     "sdr": "http://websdr.r4uab.ru/"},
+]
 
 # Minimum elevation above the horizon to bother posting about, in degrees.
 # Below about 5 degrees the signal is scraping through a lot of atmosphere
@@ -60,6 +72,10 @@ LEAD_MINUTES = 12
 
 # How far ahead to look for the next pass, in minutes.
 HORIZON_MINUTES = 75
+
+# Never post twice inside this many minutes, however many passes there are.
+# Stops a busy afternoon turning into a flood.
+MIN_GAP_MINUTES = 45
 
 # Your website, appended to posts. Set to None to leave it off.
 WEBSITE = "https://isstracker.neocities.org/"
@@ -112,55 +128,73 @@ def fetch_positions(timestamps):
 
 
 def sample(timestamps):
-    """Fetch positions and return [(timestamp, elevation, position), ...]."""
+    """Fetch positions and return [(timestamp, {station: elevation}, pos), ...]."""
     rows = []
-    for p in fetch_positions(timestamps):
-        el = elevation_deg(STATION["lat"], STATION["lon"],
-                           p["latitude"], p["longitude"], p["altitude"])
-        rows.append((p["timestamp"], el, p))
+    for pos in fetch_positions(timestamps):
+        els = {}
+        for st in STATIONS:
+            els[st["name"]] = elevation_deg(st["lat"], st["lon"],
+                                            pos["latitude"], pos["longitude"],
+                                            pos["altitude"])
+        rows.append((pos["timestamp"], els, pos))
     return rows
 
 
-def find_next_pass(now):
-    """Find the next pass over the station. Returns a dict, or None.
+def best_elevation(els):
+    """The highest elevation any of our stations sees at this instant."""
+    return max(els.values())
 
-    Two stages: a coarse 3-minute scan to find roughly where the station
-    rises above the horizon, then a 20-second scan to pin down the exact
-    rise and set times.
+
+def find_next_pass(now):
+    """Find the next time the ISS is in range of ANY of our stations.
+
+    Several stations usually hear the same pass, so this returns one event
+    with a list of which stations can hear it and how high it gets for each.
+    Stations too far apart to share a pass simply end up in separate events.
     """
     coarse_step = 180
     coarse = sample([now + s for s in
                      range(0, HORIZON_MINUTES * 60 + 1, coarse_step)])
 
-    # find the first coarse sample that is above our threshold
-    idx = next((i for i, (_, el, _) in enumerate(coarse)
-                if el >= MIN_ELEVATION), None)
+    idx = next((i for i, (_, els, _) in enumerate(coarse)
+                if best_elevation(els) >= MIN_ELEVATION), None)
     if idx is None:
         return None
 
-    # refine: scan the window around the crossing at 20-second resolution
     win_start = coarse[max(0, idx - 1)][0]
-    win_end = min(coarse[-1][0], coarse[min(len(coarse) - 1, idx + 4)][0])
+    win_end = coarse[min(len(coarse) - 1, idx + 4)][0]
     fine = sample(list(range(win_start, win_end + 1, 20)))
 
-    above = [(t, el, p) for t, el, p in fine if el >= MIN_ELEVATION]
+    above = [(t, els, pos) for t, els, pos in fine
+             if best_elevation(els) >= MIN_ELEVATION]
     if not above:
         return None
 
-    rise_t = above[0][0]
-    set_t = above[-1][0]
-    peak_t, peak_el, peak_p = max(above, key=lambda r: r[1])
+    rise_t, set_t = above[0][0], above[-1][0]
+
+    # per-station: how high does each one see this pass get?
+    peaks = {}
+    for _, els, _ in above:
+        for name, el in els.items():
+            if el > peaks.get(name, -90.0):
+                peaks[name] = el
+
+    # only name the stations that actually get a usable look at it
+    heard_by = [st for st in STATIONS if peaks.get(st["name"], -90) >= MIN_ELEVATION]
+    heard_by.sort(key=lambda st: peaks[st["name"]], reverse=True)
+
+    overall_peak = max(peaks.values())
+    peak_t = max(above, key=lambda r: best_elevation(r[1]))[0]
 
     return {
         "rise": rise_t,
         "set": set_t,
-        "peak_elevation": peak_el,
+        "peak_elevation": overall_peak,
         "peak_time": peak_t,
         "duration_min": (set_t - rise_t) / 60.0,
-        "altitude": peak_p["altitude"],
-        "sunlit": peak_p.get("visibility") == "daylight",
-        # the pass is identified by its rise time rounded to the minute,
-        # so repeated runs agree on what to call it
+        "stations": heard_by,
+        "peaks": peaks,
+        "sunlit": above[0][2].get("visibility") == "daylight",
         "key": int(round(rise_t / 60.0)),
     }
 
@@ -174,7 +208,7 @@ def load_state():
         with open(STATE_FILE) as f:
             return json.load(f)
     except (OSError, ValueError):
-        return {"announced": []}
+        return {"announced": [], "last_post": 0}
 
 
 def save_state(state):
@@ -196,17 +230,33 @@ def compose(p, now):
     mins = max(0, int(round((p["rise"] - now) / 60.0)))
     when = "NOW" if mins <= 1 else "in %d min" % mins
 
-    lines = []
-    lines.append("\U0001F6F0 ISS in radio range %s — %s UTC" % (when, hhmm(p["rise"])))
-    lines.append("")
-    lines.append("Peaks at %d° above the horizon · %d min of listening"
-                 % (round(p["peak_elevation"]), round(p["duration_min"])))
-    lines.append("Tune 145.800 MHz FM, no licence needed:")
-    lines.append(STATION["sdr"])
-    if WEBSITE:
-        lines.append("")
-        lines.append(WEBSITE)
-    return "\n".join(lines)
+    stations = p["stations"]
+    best = stations[0] if stations else STATIONS[0]
+    heard = " \u00B7 ".join("%s %d\u00B0" % (st["name"], round(p["peaks"][st["name"]]))
+                            for st in stations)
+
+    def build(include_site, station_list):
+        heard_txt = " \u00B7 ".join(
+            "%s %d\u00B0" % (st["name"], round(p["peaks"][st["name"]]))
+            for st in station_list)
+        out = ["\U0001F6F0 ISS in radio range %s \u2014 %s UTC" % (when, hhmm(p["rise"])),
+               "",
+               "Audible from: " + heard_txt,
+               "%d min of listening \u00B7 tune 145.800 MHz FM:" % round(p["duration_min"]),
+               best["sdr"]]
+        if include_site and WEBSITE:
+            out += ["", WEBSITE]
+        return "\n".join(out)
+
+    # Bluesky caps a post at 300 characters. Shed the website first, then
+    # the quieter stations, until it fits.
+    text = build(True, stations)
+    if len(text) > 300:
+        text = build(False, stations)
+    while len(text) > 300 and len(stations) > 1:
+        stations = stations[:-1]
+        text = build(False, stations)
+    return text
 
 
 URL_RE = re.compile(rb"https?://[^\s\)\]]+")
@@ -275,7 +325,9 @@ def main():
     args = ap.parse_args()
 
     now = int(time.time())
-    print("checking at %s UTC for %s" % (hhmm(now), STATION["name"]))
+    print("checking at %s UTC across %d receivers: %s"
+          % (hhmm(now), len(STATIONS),
+             ", ".join(st["name"] for st in STATIONS)))
 
     try:
         p = find_next_pass(now)
@@ -301,6 +353,12 @@ def main():
         print("already posted about this pass. Nothing to do.")
         return 0
 
+    since = (now - state.get("last_post", 0)) / 60.0
+    if since < MIN_GAP_MINUTES and not args.force:
+        print("posted only %.0f min ago, holding off (minimum gap is %d min)."
+              % (since, MIN_GAP_MINUTES))
+        return 0
+
     if mins_away > LEAD_MINUTES and not args.force:
         print("still %.1f min away, waiting until it is within %d."
               % (mins_away, LEAD_MINUTES))
@@ -320,6 +378,7 @@ def main():
     print("posted.")
 
     state.setdefault("announced", []).append(p["key"])
+    state["last_post"] = now
     save_state(state)
     return 0
 
