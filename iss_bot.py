@@ -70,9 +70,12 @@ MIN_ELEVATION = 10.0
 # the brief, low, barely-audible passes.
 MIN_PEAK_ELEVATION = 20.0
 
-# Post this many minutes before the pass starts. GitHub Actions cron is
-# often late, so leave some slack.
-LEAD_MINUTES = 12
+# Post this many minutes before the pass starts.
+#
+# This MUST comfortably exceed the cron interval, because GitHub skips
+# scheduled runs without warning. At a 10-minute cadence, 20 minutes of lead
+# means a pass survives one dropped run and still gets announced.
+LEAD_MINUTES = 20
 
 # How far ahead to look for the next pass, in minutes.
 HORIZON_MINUTES = 75
