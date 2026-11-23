@@ -39,8 +39,12 @@ const STATIONS = [
   //        Washington DC 38.9200/-77.0700 http://websdr.us:8902/
 ];
 
+// Raising MIN_PEAK_ELEVATION filters out weak passes but also thins the feed.
+// Roughly, as a share of all passes that clear the horizon at all:
+//    10 deg -> 62%   15 deg -> 49%   20 deg -> 40%   30 deg -> 28%   40 deg -> 20%
+// 15 is a deliberately lenient setting; MAX_POSTS_PER_DAY is the real brake.
 const MIN_ELEVATION      = 10;   // degrees: when a pass counts as started
-const MIN_PEAK_ELEVATION = 20;   // skip passes that never get this high
+const MIN_PEAK_ELEVATION = 15;   // skip passes that never get this high
 const LEAD_MINUTES       = 15;   // post this far ahead of the pass
 const HORIZON_MINUTES    = 75;   // how far ahead to look
 const MIN_GAP_MINUTES    = 45;   // never two posts inside this window
